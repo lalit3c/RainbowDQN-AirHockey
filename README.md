@@ -34,6 +34,108 @@ hockey-env-dqn/
 └── README.md
 ```
 
+## Quick Start with Pre-trained Model
+
+Get started immediately using best-performing Rainbow agent trained for 200,000 episodes.
+
+### Setup
+
+```bash
+# Clone and install
+git clone https://github.com/lalit3c/RainbowDQN-AirHockey.git
+cd RainbowDQN-AirHockey
+pip install -r requirements.txt
+```
+
+### Load and Test Pre-trained Agent
+
+```python
+import numpy as np
+import torch
+import json
+from agents.rainbow import RainbowAgent
+import hockey.hockey_env as h_env
+
+# Path to trained model
+model_path = "logs/Rainbow_no_noisy_20260222_011934/best_model.pt"
+config_path = "logs/Rainbow_no_noisy_20260222_011934/config.json"
+
+# Load configuration
+with open(config_path, 'r') as f:
+    saved_config = json.load(f)
+
+# Load checkpoint
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+checkpoint = torch.load(model_path, map_location=device, weights_only=False)
+model_config = checkpoint['config']
+
+# Create agent with saved configuration
+rainbow_agent = RainbowAgent(
+    state_dim=model_config['state_dim'],
+    action_dim=model_config['action_dim'],
+    hidden_dims=tuple(saved_config['hidden_dims']),
+    n_step=model_config['n_step'],
+    num_atoms=model_config['num_atoms'],
+    v_min=model_config['v_min'],
+    v_max=model_config['v_max'],
+    noisy=model_config['noisy'],
+    device="auto"
+)
+
+# Load trained weights
+rainbow_agent.online_network.load_state_dict(checkpoint['online_network_state_dict'])
+rainbow_agent.target_network.load_state_dict(checkpoint['target_network_state_dict'])
+
+print(f"Model loaded successfully!")
+print(f"Training steps: {checkpoint.get('step_count', 'N/A'):,}")
+```
+
+### Play Against Weak Opponent
+
+```python
+# Create environment
+env = h_env.HockeyEnv()
+player1 = rainbow_agent  # Trained agent
+player2 = h_env.BasicOpponent(weak=True)  # Weak opponent
+
+# Run evaluation
+num_episodes = 20
+winners = []
+rewards = []
+
+print(f"Testing against weak opponent...")
+
+for episode in range(num_episodes):
+    obs, info = env.reset()
+    obs_agent2 = env.obs_agent_two()
+    episode_reward = 0
+    
+    for step in range(251):
+        a1 = env.discrete_to_continous_action(
+            player1.select_action(obs, training=False)
+        )
+        a2 = player2.act(obs_agent2)
+        
+        obs, r, d, t, info = env.step(np.hstack([a1, a2]))
+        obs_agent2 = env.obs_agent_two()
+        episode_reward += r
+        
+        if d or t:
+            break
+    
+    winners.append(info['winner'])
+    rewards.append(episode_reward)
+
+# Results
+wins = sum(1 for w in winners if w == 1)
+losses = sum(1 for w in winners if w == -1)
+draws = sum(1 for w in winners if w == 0)
+
+env.close()
+```
+    
+
+
 ## Environment Description
 ![Screenshot](assets/hockeyenv1.png)
 The Hockey environment simulates a two-player air hockey game implemented using the Box2D physics engine. The simulation runs at 50 FPS with a maximum episode length of 250 timesteps.
